@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vector Line Tracker & Exporter</title>
+    <style>
+        :root {
+            --grid-size: 400px;
+            --line-weight: 10px; /* Thicker hitbox for easier clicking */
+            --primary-color: #007bff;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            background-color: #f4f7f6;
+            padding: 40px; 
+        }
+
+        .app-container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+
+        /* Controls Section */
+        .controls { margin-bottom: 20px; display: flex; gap: 10px; }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: opacity 0.2s;
+        }
+        #download-btn { background-color: #28a745; color: white; }
+        #clear-btn { background-color: #dc3545; color: white; }
+        button:hover { opacity: 0.8; }
+
+        input {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        /* Label Layouts */
+        .top-labels { 
+            display: grid; 
+            grid-template-columns: 30px repeat(5, 1fr); 
+            width: calc(var(--grid-size) + 30px); 
+            text-align: center; 
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .main-area { display: flex; }
+
+        .left-labels { 
+            display: grid; 
+            grid-template-rows: repeat(5, 1fr); 
+            height: var(--grid-size); 
+            width: 30px; 
+            font-weight: bold; 
+            align-items: center;
+        }
+
+        /* The Grid Box */
+        #grid-intersections {
+            position: relative;
+            width: var(--grid-size);
+            height: var(--grid-size);
+            background-color: #fff;
+            border: 1px solid #ccc;
+            background-image: 
+                linear-gradient(to right, #eee 1px, transparent 1px),
+                linear-gradient(to bottom, #eee 1px, transparent 1px);
+            background-size: 25% 25%;
+        }
+
+        /* The clickable lines */
+        .line {
+            position: absolute;
+            background-color: transparent; 
+            cursor: pointer;
+            z-index: 5;
+        }
+        .line:hover { background-color: rgba(0, 123, 255, 0.15); }
+        .line.active { background-color: var(--primary-color); }
+
+        .h-line { height: var(--line-weight); transform: translateY(-50%); }
+        .v-line { width: var(--line-weight); transform: translateX(-50%); }
+
+        .dot {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: #bbb;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .line-counter {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #fff;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 1px 4px;
+            font-size: 10px;
+            pointer-events: none;
+            display: none;
+        }
+
+        /* Log Styling */
+        .log-container { margin-top: 25px; border-top: 1px solid #eee; padding-top: 15px; }
+        #vector-log { 
+            list-style: none; 
+            padding: 0; 
+            max-height: 150px; 
+            overflow-y: auto; 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 5px;
+        }
+        #vector-log li { 
+            background: #e9ecef; 
+            padding: 4px 10px; 
+            border-radius: 15px; 
+            font-size: 0.85rem; 
+            font-family: monospace; 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <h2>Vector Interaction Grid</h2>
+        
+        <div class="controls">
+            <button id="clear-btn" onclick="clearGrid()">Clear Grid</button>
+            <input type="text" id="car-id" placeholder="Car ID" maxlength="6" style="width: 100px; text-transform: uppercase;">
+            <input type="number" id="speed" placeholder="Speed" min="0" max="55" style="width: 80px;">
+            <select id="color-select" onchange="generateCarId()" style="padding: 10px; border-radius: 4px; border: 1px solid #ccc;">
+                <option value="#007bff">Blue</option>
+                <option value="#dc3545">Red</option>
+                <option value="#28a745">Green</option>
+                <option value="#fd7e14">Orange</option>
+                <option value="#6f42c1">Purple</option>
+            </select>
+        </div>
+
+        <div class="top-labels">
+            <span></span><span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
+        </div>
+
+        <div class="main-area">
+            <div class="left-labels">
+                <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+            </div>
+
+            <div id="grid-intersections">
+                </div>
+        </div>
+
+        <div class="log-container">
+            <strong>Active Vectors:</strong>
+            <ul id="vector-log"></ul>
+        </div>
+    </div>
+
+    <script>
+        const grid = document.getElementById('grid-intersections');
+        const log = document.getElementById('vector-log');
+        const letters = ['A', 'B', 'C', 'D', 'E'];
+        let activeVectors = new Map(); // Using a Map to store data per vector
+
+        // Initialize Grid
+        function initGrid() {
+            grid.innerHTML = '';
+            for (let r = 0; r < 5; r++) {
+                for (let c = 0; c < 5; c++) {
+                    const xPct = (c / 4) * 100;
+                    const yPct = (r / 4) * 100;
+
+                    const dot = document.createElement('div');
+                    dot.className = 'dot';
+                    dot.style.left = xPct + '%';
+                    dot.style.top = yPct + '%';
+                    grid.appendChild(dot);
+
+                    if (c < 4) {
+                        createLine(xPct, yPct, 'h', `${letters[c]}${r+1}${letters[c+1]}${r+1}`);
+                    }
+                    if (r < 4) {
+                        createLine(xPct, yPct, 'v', `${letters[c]}${r+1}${letters[c]}${r+2}`);
+                    }
+                }
+            }
+        }
+
+        function createLine(x, y, type, id) {
+            const line = document.createElement('div');
+            line.className = `line ${type}-line`;
+            line.style.left = x + '%';
+            line.style.top = y + '%';
+            if (type === 'h') line.style.width = '25%';
+            else line.style.height = '25%';
+            
+            const counter = document.createElement('span');
+            counter.className = 'line-counter';
+            counter.innerText = '0';
+            line.appendChild(counter);
+            line.dataset.count = 0;
+
+            line.onclick = () => toggleVector(id, line, 1);
+            line.oncontextmenu = (e) => {
+                e.preventDefault();
+                toggleVector(id, line, -1);
+            };
+            grid.appendChild(line);
+        }
+
+        function toggleVector(id, el, change) {
+            let count = parseInt(el.dataset.count) || 0;
+            
+            if (change < 0 && count <= 0) return;
+
+            count += change;
+            el.dataset.count = count;
+            const counter = el.querySelector('.line-counter');
+            counter.style.display = count > 0 ? 'block' : 'none';
+
+            if (count > 0) {
+                const carId = document.getElementById('car-id').value;
+                const speed = document.getElementById('speed').value;
+                const color = document.getElementById('color-select').value;
+
+                counter.innerText = speed;
+
+                const messageData = `${carId},${id},${speed}`;
+                activeVectors.set(id, messageData);
+                el.classList.add('active');
+                el.style.backgroundColor = color;
+
+                // Publish to Pub/Sub on increment
+                if (change > 0) publishToPubSub(messageData);
+            } else {
+                activeVectors.delete(id);
+                el.classList.remove('active');
+                el.style.backgroundColor = '';
+            }
+            updateLog();
+        }
+
+        function updateLog() {
+            log.innerHTML = '';
+            activeVectors.forEach(val => {
+                const li = document.createElement('li');
+                li.innerText = val;
+                log.appendChild(li);
+            });
+        }
+
+        function clearGrid() {
+            activeVectors.clear();
+            document.querySelectorAll('.line').forEach(l => {
+                l.classList.remove('active');
+                l.style.backgroundColor = '';
+                l.dataset.count = 0;
+                const c = l.querySelector('.line-counter');
+                if (c) { c.innerText = '0'; c.style.display = 'none'; }
+            });
+            updateLog();
+        }
+
+        async function publishToPubSub(data) {
+            const projectId = 'roigcp-traffic';
+            const topicId = 'trafficinput';
+            // NOTE: In a real application, do not expose tokens on the client side.
+            // Use a backend proxy or proper OAuth flow.
+            const token = 'YOUR_ACCESS_TOKEN_HERE'; 
+            const url = `https://pubsub.googleapis.com/v1/projects/${projectId}/topics/${topicId}:publish`;
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ messages: [{ data: btoa(data) }] })
+                });
+                console.log(`Sent: ${data}`, await response.json());
+            } catch (e) { console.error('Pub/Sub Error:', e); }
+        }
+
+        function generateCarId() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let id = '';
+            for (let i = 0; i < 6; i++) {
+                id += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            document.getElementById('car-id').value = id;
+        }
+
+        function initInputs() {
+            generateCarId();
+            document.getElementById('speed').value = Math.floor(Math.random() * 56);
+        }
+
+        initGrid();
+        initInputs();
+    </script>
+</body>
+</html>
