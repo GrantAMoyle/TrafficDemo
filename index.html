@@ -240,7 +240,8 @@
 
                 counter.innerText = speed;
 
-                const messageData = `${carId},${id},${speed}`;
+                const timestamp = new Date().toISOString();
+                const messageData = `${timestamp},${carId},${id},${speed}`;
                 activeVectors.set(id, messageData);
                 el.classList.add('active');
                 el.style.backgroundColor = color;
